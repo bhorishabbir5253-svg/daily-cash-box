@@ -93,7 +93,7 @@ dialog input{width:100%}
 <script>
 // ---------- Settings and data ----------
 const OPTS = {
-   in:  ['Cash Balance', 'Advance', 'Cash Sale', 'Online Sale', 'Udhary'],
+  in:  ['Cash Balance', 'Advance', 'Cash Sale', 'Online Sale', 'Udhary'],
   out: ['Tempo', 'Transport', 'Tea', 'Water', 'Own Work', 'Collection', 'Petrol', 'Udhary Jama']
 };
 const KEY = 'cashbox_v1';
@@ -126,11 +126,11 @@ function toast(m) {
 const locked = () => day().closed && (toast('Day is closed. Unlock it first.'), true);
 
 // ---------- Add / edit / delete ----------
-function add(side, amount, label) {
+function add(side, amount, label, note = '') {
   const d = day();
   const id = Date.now() + Math.random();
   const time = new Date().toTimeString().slice(0, 5);
-  d.entries.push({ id, side, amount, label, pair: null, time });
+  d.entries.push({ id, side, amount, label, note, pair: null, time });
   // Online Sale in incoming also goes to outgoing, linked by "pair"
   if (side === 'in' && label === 'Online Sale') {
     d.entries[d.entries.length - 1].pair = id;
@@ -151,6 +151,10 @@ function edit(id) {
   const v = parseFloat(prompt('New amount', e.amount));
   if (!(v > 0)) return;
   d.entries.forEach(x => { if (x.id === id || (e.pair && x.pair === e.pair)) x.amount = v; });
+  if (e.label === 'Udhary' || e.label === 'Udhary Jama') {
+    const n = prompt('Person name', e.note || '');
+    if (n !== null) e.note = n.trim();
+  }
   save(); render();
 }
 function unlock() {
@@ -168,7 +172,7 @@ function render() {
   $('date').value = date; $('pd').textContent = date;
   ['in', 'out'].forEach(s => {
     $('rows-' + s).innerHTML = d.entries.filter(e => e.side === s).map(e =>
-      `<tr><td><b>${fmt(e.amount)}</b></td><td>${e.label}${e.pair ? ' 🔗' : ''}</td><td>${e.time}</td>
+      `<tr><td><b>${fmt(e.amount)}</b></td><td>${e.label}${e.pair ? ' 🔗' : ''}${e.note ? '<br><small>' + esc(e.note) + '</small>' : ''}</td><td>${e.time}</td>
        <td><button onclick="edit(${e.id})">✎</button> <button onclick="del(${e.id})">🗑</button></td></tr>`).join('');
     $('amt-' + s).disabled = d.closed;
   });
@@ -221,12 +225,31 @@ function showList() {
   l.hidden = false; l.focus();
 }
 function closeList() { ['in', 'out'].forEach(s => $('list-' + s).hidden = true); }
+const esc = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 function choose(i) {
   const { s, v } = pick;
+  const label = OPTS[s][i];
   closeList();
-  add(s, v, OPTS[s][i]);
-  const a = $('amt-' + s); a.value = ''; a.focus();
   pick = null;
+  if (label === 'Udhary' || label === 'Udhary Jama') askName(s, v, label);
+  else finish(s, v, label, '');
+}
+function finish(s, v, label, note) {
+  add(s, v, label, note);
+  const a = $('amt-' + s); a.value = ''; a.focus();
+}
+// small box to type the person's name (Enter = save)
+function askName(s, v, label) {
+  dlg.innerHTML = `<h3>${label}: ${fmt(v)}</h3>
+    <label>${s === 'in' ? 'Name of the person whose udhary came' : 'Name of the person to whom money is given'}</label>
+    <input id="nm" placeholder="Type name" autocomplete="off">
+    <div class="row"><button class="p" id="nok">Save</button><button id="nsk">Skip name</button></div>`;
+  const n = $('nm');
+  const save1 = name => { dlg.close(); finish(s, v, label, name); };
+  $('nok').onclick = () => save1(n.value.trim());
+  $('nsk').onclick = () => save1('');
+  n.onkeydown = e => { if (e.key === 'Enter') save1(n.value.trim()); };
+  dlg.showModal(); n.focus();
 }
 
 // ---------- Tally (day-end hisab) ----------
