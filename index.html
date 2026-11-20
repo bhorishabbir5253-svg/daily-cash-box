@@ -10,7 +10,7 @@
 <style>
 :root{--b:#1e40af;--g:#15803d;--r:#b91c1c;--bg:#f1f5f9}
 *{box-sizing:border-box}
-body{margin:0;font:16px system-ui,Segoe UI,sans-serif;background:var(--bg);color:#0f172a;padding-bottom:96px}
+body{margin:0;font:16px system-ui,Segoe UI,sans-serif;background:var(--bg);color:#0f172a;padding-bottom:96px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 header{background:var(--b);color:#fff;padding:10px 14px}
 h1{margin:0 0 8px;font-size:20px}
 h1 small{display:block;font-size:12px;font-weight:400;opacity:.85}
@@ -29,7 +29,7 @@ h2{margin:0 0 8px;font-size:18px}
 .opt{padding:12px 14px;font-size:18px;cursor:pointer}
 .opt.on{background:var(--b);color:#fff}
 table{width:100%;border-collapse:collapse;margin-top:10px}
-td,th{padding:6px;border-bottom:1px solid #e2e8f0;text-align:left}
+td,th{padding:6px;border-bottom:1px solid #e2e8f0;text-align:left;vertical-align:top}
 td button{padding:2px 8px}
 footer{position:fixed;bottom:0;left:0;right:0;background:#fff;box-shadow:0 -2px 8px #0003;display:flex;justify-content:space-around;align-items:center;padding:8px;gap:6px;flex-wrap:wrap}
 footer div{text-align:center;font-size:13px}
@@ -40,10 +40,26 @@ dialog input{width:100%}
 #res{margin:10px 0;font-size:22px;font-weight:700}
 .row{display:flex;gap:8px;margin-top:10px}
 #toast{position:fixed;top:12px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:8px 16px;border-radius:20px;display:none;z-index:99}
-@media print{.bar,footer,.entry,#banner,td button{display:none}}
+
+/* ---- PRINT: everything on ONE A4 page (JS adds class "pr" and shrinks to fit) ---- */
+@page{size:A4;margin:8mm}
+body.pr{background:#fff;padding:0;font-size:12px}
+.pr #sheet{width:194mm}
+.pr .bar,.pr .entry,.pr td button,.pr #tally,.pr th:last-child,.pr td:last-child{display:none}
+.pr header{background:#fff;color:#000;padding:0 0 4px;border-bottom:2px solid #000}
+.pr h1{font-size:16px;margin:0}
+.pr main{grid-template-columns:1fr 1fr;padding:6px 0;gap:8px}
+.pr .panel{box-shadow:none;border:1px solid #888;border-radius:0;padding:6px}
+.pr h2{font-size:14px;margin:0}
+.pr table{margin-top:4px}
+.pr td,.pr th{padding:2px 4px;font-size:11px}
+.pr footer{position:static;box-shadow:none;border:1px solid #000;margin-top:6px;padding:6px}
+.pr #banner{margin:6px 0 0;background:#fff;border:1px solid #888;padding:4px 8px;font-size:12px}
+.pr #banner button{display:none}
 </style>
 </head>
 <body>
+<div id="sheet">
 <header>
   <h1>Daily Cash Box <small>Maharashtra Industrial Suppliers, Baramati &nbsp;<span id="pd"></span></small></h1>
   <div class="bar">
@@ -86,6 +102,7 @@ dialog input{width:100%}
   <div>Cash in Box<b id="t-box"></b></div>
   <button class="p" id="tally">Tally</button>
 </footer>
+</div>
 
 <dialog id="dlg"></dialog>
 <div id="toast"></div>
@@ -94,65 +111,68 @@ dialog input{width:100%}
 // ---------- Settings and data ----------
 const OPTS = {
   in:  ['Cash Balance', 'Advance', 'Cash Sale', 'Online Sale', 'Udhary'],
-  out: ['Tempo', 'Transport', 'Tea', 'Water', 'Own Work', 'Collection', 'Petrol', 'Udhary Jama']
+  out: ['Tempo', 'Transport', 'Tea', 'Water', 'Own Work', 'Collection', 'Petrol', 'Jama']
 };
 const KEY = 'cashbox_v1';
 const $ = id => document.getElementById(id);
 const dlg = $('dlg');
 let db = load();
-let date = new Date().toLocaleDateString('en-CA');   // today as YYYY-MM-DD
-let pick = null;                                      // option being chosen
+let date = new Date().toLocaleDateString('en-CA');
+let pick = null;
 
+function fix(j) {   // old label "Udhary Jama" becomes "Jama"
+  Object.values(j.days).forEach(d => d.entries.forEach(e => { if (e.label === 'Udhary Jama') e.label = 'Jama'; }));
+  return j;
+}
 function load() {
-  try { return JSON.parse(localStorage.getItem(KEY)) || { days: {} }; }
+  try { return fix(JSON.parse(localStorage.getItem(KEY)) || { days: {} }); }
   catch (e) { return { days: {} }; }
 }
 function save() {
   try { localStorage.setItem(KEY, JSON.stringify(db)); }
   catch (e) { alert('Could not save data!'); }
 }
-// get (or create) the record of the selected day
 const day = () => db.days[date] || (db.days[date] = { entries: [], closed: false, counted: null, diff: null, status: null });
 
 // ---------- Helpers ----------
 const r2  = n => Math.round(n * 100) / 100;
 const fmt = n => '₹' + Number(n).toLocaleString('en-IN', { maximumFractionDigits: 2 });
-const sum = (list, side) => r2(list.filter(e => e.side === side).reduce((a, e) => a + e.amount, 0));
+const sum = (list, side) => r2(list.filter(e => e.side === side).reduce((a, e) => a + Number(e.amount), 0));
 const stat = d => d === 0 ? 'Correct (0)' : d > 0 ? fmt(d) + ' More' : fmt(-d) + ' Less';
-function toast(m) {
-  const t = $('toast'); t.textContent = m; t.style.display = 'block';
-  setTimeout(() => t.style.display = 'none', 1800);
-}
+const esc = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const same = (a, b) => String(a) === String(b);
+function toast(m) { const t = $('toast'); t.textContent = m; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 1800); }
 const locked = () => day().closed && (toast('Day is closed. Unlock it first.'), true);
+// entries that ask for a name / description
+const needsNote = (side, label) => (side === 'out' && !['Online Sale', 'Tea', 'Water'].includes(label)) || label === 'Udhary';
 
 // ---------- Add / edit / delete ----------
 function add(side, amount, label, note = '') {
   const d = day();
-  const id = Date.now() + Math.random();
+  const id = String(Date.now() + Math.random());
   const time = new Date().toTimeString().slice(0, 5);
   d.entries.push({ id, side, amount, label, note, pair: null, time });
-  // Online Sale in incoming also goes to outgoing, linked by "pair"
-  if (side === 'in' && label === 'Online Sale') {
+  if (side === 'in' && label === 'Online Sale') {          // auto outgoing entry, linked
     d.entries[d.entries.length - 1].pair = id;
-    d.entries.push({ id: id + 0.5, side: 'out', amount, label: 'Online Sale', pair: id, time });
+    d.entries.push({ id: id + 'p', side: 'out', amount, label: 'Online Sale', note: '', pair: id, time });
   }
   save(); render();
 }
 function del(id) {
   if (locked()) return;
-  const d = day(), e = d.entries.find(x => x.id === id);
+  const d = day(), e = d.entries.find(x => same(x.id, id));
   if (!e || !confirm('Delete this entry?')) return;
-  d.entries = d.entries.filter(x => x.id !== id && !(e.pair && x.pair === e.pair));
+  d.entries = d.entries.filter(x => !same(x.id, id) && !(e.pair && same(x.pair, e.pair)));
   save(); render();
 }
 function edit(id) {
   if (locked()) return;
-  const d = day(), e = d.entries.find(x => x.id === id);
+  const d = day(), e = d.entries.find(x => same(x.id, id));
   const v = parseFloat(prompt('New amount', e.amount));
   if (!(v > 0)) return;
-  d.entries.forEach(x => { if (x.id === id || (e.pair && x.pair === e.pair)) x.amount = v; });
-  if (e.label === 'Udhary' || e.label === 'Udhary Jama') {
-    const n = prompt('Person name', e.note || '');
+  d.entries.forEach(x => { if (same(x.id, id) || (e.pair && same(x.pair, e.pair))) x.amount = v; });
+  if (needsNote(e.side, e.label)) {
+    const n = prompt(e.side === 'in' ? 'Person name' : 'Description / name', e.note || '');
     if (n !== null) e.note = n.trim();
   }
   save(); render();
@@ -172,15 +192,14 @@ function render() {
   $('date').value = date; $('pd').textContent = date;
   ['in', 'out'].forEach(s => {
     $('rows-' + s).innerHTML = d.entries.filter(e => e.side === s).map(e =>
-      `<tr><td><b>${fmt(e.amount)}</b></td><td>${e.label}${e.pair ? ' 🔗' : ''}${e.note ? '<br><small>' + esc(e.note) + '</small>' : ''}</td><td>${e.time}</td>
-       <td><button onclick="edit(${e.id})">✎</button> <button onclick="del(${e.id})">🗑</button></td></tr>`).join('');
+      `<tr><td><b>${fmt(e.amount)}</b></td><td>${e.label}${e.pair ? ' 🔗' : ''}${e.note ? '<br><small>' + esc(e.note) + '</small>' : ''}</td><td>${e.time || ''}</td>
+       <td><button onclick="edit('${e.id}')">✎</button> <button onclick="del('${e.id}')">🗑</button></td></tr>`).join('');
     $('amt-' + s).disabled = d.closed;
   });
   const i = sum(d.entries, 'in'), o = sum(d.entries, 'out');
   $('t-in').textContent = fmt(i);
   $('t-out').textContent = fmt(o);
   $('t-box').textContent = fmt(r2(i - o));
-
   const b = $('banner');
   if (d.closed) {
     b.style.display = 'block';
@@ -212,7 +231,7 @@ function render() {
     else if (e.key === 'ArrowUp') { pick.i = (pick.i - 1 + n) % n; showList(); e.preventDefault(); }
     else if (e.key === 'Enter') choose(pick.i);
     else if (e.key === 'Escape') { closeList(); a.focus(); }
-    else {                                   // first letter jumps to an option
+    else {
       const k = e.key.toLowerCase();
       const m = OPTS[s].map((o, i) => i).filter(i => OPTS[s][i][0].toLowerCase() === k);
       if (m.length) { pick.i = m.find(i => i > pick.i) ?? m[0]; showList(); }
@@ -225,30 +244,28 @@ function showList() {
   l.hidden = false; l.focus();
 }
 function closeList() { ['in', 'out'].forEach(s => $('list-' + s).hidden = true); }
-const esc = t => String(t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 function choose(i) {
-  const { s, v } = pick;
-  const label = OPTS[s][i];
-  closeList();
-  pick = null;
-  if (label === 'Udhary' || label === 'Udhary Jama') askName(s, v, label);
-  else finish(s, v, label, '');
+  const { s, v } = pick, label = OPTS[s][i];
+  closeList(); pick = null;
+  if (needsNote(s, label)) askNote(s, v, label); else finish(s, v, label, '');
 }
 function finish(s, v, label, note) {
   add(s, v, label, note);
   const a = $('amt-' + s); a.value = ''; a.focus();
 }
-// small box to type the person's name (Enter = save)
-function askName(s, v, label) {
-  dlg.innerHTML = `<h3>${label}: ${fmt(v)}</h3>
-    <label>${s === 'in' ? 'Name of the person whose udhary came' : 'Name of the person to whom money is given'}</label>
-    <input id="nm" placeholder="Type name" autocomplete="off">
-    <div class="row"><button class="p" id="nok">Save</button><button id="nsk">Skip name</button></div>`;
+// small box for name / description (Enter = save, empty is allowed)
+function askNote(s, v, label) {
+  const t = s === 'in' ? 'Name of the person whose udhary came'
+    : label === 'Jama' ? 'Name of the person to whom money is given'
+    : 'Description (optional)';
+  dlg.innerHTML = `<h3>${label}: ${fmt(v)}</h3><label>${t}</label>
+    <input id="nm" placeholder="Type here" autocomplete="off">
+    <div class="row"><button class="p" id="nok">Save</button><button id="nsk">Skip</button></div>`;
   const n = $('nm');
-  const save1 = name => { dlg.close(); finish(s, v, label, name); };
-  $('nok').onclick = () => save1(n.value.trim());
-  $('nsk').onclick = () => save1('');
-  n.onkeydown = e => { if (e.key === 'Enter') save1(n.value.trim()); };
+  const go = txt => { dlg.close(); finish(s, v, label, txt); };
+  $('nok').onclick = () => go(n.value.trim());
+  $('nsk').onclick = () => go('');
+  n.onkeydown = e => { if (e.key === 'Enter') go(n.value.trim()); };
   dlg.showModal(); n.focus();
 }
 
@@ -256,12 +273,10 @@ function askName(s, v, label) {
 function tally() {
   const d = day(), i = sum(d.entries, 'in'), o = sum(d.entries, 'out'), box = r2(i - o);
   dlg.innerHTML = `<h3>Tally - ${date}</h3>
-    <p>Total Incoming: <b>${fmt(i)}</b></p>
-    <p>Total Outgoing: <b>${fmt(o)}</b></p>
+    <p>Total Incoming: <b>${fmt(i)}</b></p><p>Total Outgoing: <b>${fmt(o)}</b></p>
     <p>Cash should be in box (Incoming − Outgoing): <b>${fmt(box)}</b></p>
     <label>Cash counted in box</label>
-    <input id="cnt" inputmode="decimal" value="${d.counted ?? ''}">
-    <div id="res"></div>
+    <input id="cnt" inputmode="decimal" value="${d.counted ?? ''}"><div id="res"></div>
     <div class="row"><button class="p" id="cls">Close Day</button><button onclick="dlg.close()">Cancel</button></div>`;
   const c = $('cnt'), res = $('res');
   const upd = () => {
@@ -295,6 +310,16 @@ function history() {
 }
 function go(k) { date = k; dlg.close(); render(); }
 
+// ---------- Print on ONE A4 page ----------
+function prep() {                       // runs just before printing
+  const s = $('sheet');
+  document.body.classList.add('pr');
+  s.style.zoom = 1;
+  s.style.zoom = Math.min(1, 1040 / s.scrollHeight);   // shrink only if too tall for A4
+}
+window.addEventListener('beforeprint', prep);
+window.addEventListener('afterprint', () => { document.body.classList.remove('pr'); $('sheet').style.zoom = ''; });
+
 // ---------- Buttons ----------
 const shift = n => { const d = new Date(date + 'T00:00:00'); d.setDate(d.getDate() + n); date = d.toLocaleDateString('en-CA'); render(); };
 $('prev').onclick = () => shift(-1);
@@ -306,8 +331,7 @@ $('prt').onclick = () => print();
 $('bak').onclick = () => {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([JSON.stringify(db)], { type: 'application/json' }));
-  a.download = 'cashbox-backup-' + date + '.json';
-  a.click();
+  a.download = 'cashbox-backup-' + date + '.json'; a.click();
 };
 $('rst').onclick = () => $('file').click();
 $('file').onchange = e => {
@@ -317,7 +341,7 @@ $('file').onchange = e => {
     try {
       const j = JSON.parse(r.result);
       if (!j.days) throw 0;
-      if (confirm('Replace ALL current data with this backup?')) { db = j; save(); render(); toast('Restored'); }
+      if (confirm('Replace ALL current data with this backup?')) { db = fix(j); save(); render(); toast('Restored'); }
     } catch (x) { alert('This is not a valid backup file'); }
   };
   r.readAsText(f); e.target.value = '';
