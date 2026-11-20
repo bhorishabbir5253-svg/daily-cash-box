@@ -144,7 +144,9 @@ const same = (a, b) => String(a) === String(b);
 function toast(m) { const t = $('toast'); t.textContent = m; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 1800); }
 const locked = () => day().closed && (toast('Day is closed. Unlock it first.'), true);
 // entries that ask for a name / description
-const needsNote = (side, label) => (side === 'out' && !['Online Sale', 'Tea', 'Water'].includes(label)) || label === 'Udhary';
+const needsNote = (side, label) => side === 'in'
+  ? ['Udhary', 'Cash Sale', 'Online Sale'].includes(label)
+  : !['Online Sale', 'Tea', 'Water'].includes(label);
 
 // ---------- Add / edit / delete ----------
 function add(side, amount, label, note = '') {
